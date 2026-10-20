@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Iara – La Sirène de l'Amazone</title>
+<style>
+html,body{margin:0;height:100%;background:#0b1d33;overflow:hidden}
+canvas{display:block;width:100%;height:100%;object-fit:contain;image-rendering:pixelated;touch-action:none}
+</style></head><body><canvas id="c" width="480" height="320"></canvas>
+<script>
+/* ====== RÉGLAGES (faciles à modifier) ====== */
+const SWIM = 150;      // vitesse de nage de la sirène
+const CURRENT = 0.45;  // force du courant sur la sirène (0 = aucun)
+const LIVES = 3;       // nombre de vies
+const LEVELS = [       // vitesse de la rivière (px/s) et objectif de déchets par niveau
+  {name:'Le plastique', goal:8,  speed:42, every:4.2, obs:['tronc','nageur']},
+  {name:'Le papier',    goal:10, speed:54, every:3.6, obs:['tronc','nageur','pecheur']},
+  {name:'Le métal',     goal:12, speed:66, every:3.0, obs:['tronc','nageur','pecheur','bateau']}
+];
+/* =========================================== */
+
+const cv=document.getElementById('c'),g=cv.getContext('2d');g.imageSmoothingEnabled=false;
+const W=480,H=320,TOP=40,BOT=282;
+function spr(s,x,y,k){const r=s.r,p=s.p;for(let j=0;j<r.length;j++)for(let i=0;i<r[j].length;i++){const c=p[r[j][i]];if(c){g.fillStyle=c;g.fillRect(Math.round(x+i*k),Math.round(y+j*k),k,k)}}}
+
+/* ---- sprites ---- */
+const MERMAID={p:{h:'#4b2a14',s:'#d49a62',e:'#222',b:'#ff7bc0',g:'#2fbf71',G:'#1a8a52',f:'#7be8a8'},r:[
+"................",
+"..........hhhh..",
+".........hhhhhh.",
+"........hhssssh.",
+"........hhssesh.",
+".....hhhhbbsssh.",
+"..f..hhggbbbgg..",
+".fff.gggGgggg...",
+"ffffgggggGggg...",
+".fff.gGgggGg....",
+"..f............."]};
+const HEART={p:{h:'#ff4d6d'},r:[".hh.hh.","hhhhhhh","hhhhhhh",".hhhhh.","..hhh..","...h..."]};
+const HEART0={p:{h:'#2b3f55'},r:HEART.r};
+const BOTTLE={p:{k:'#2a6fdb',c:'#7fd6ff',w:'#fff'},r:["...kk...","...cc...","..cccc..",".cwcccc.",".cwcccc.",".cwcccc.",".cccccc.","..cccc.."]};
+const BAG={p:{a:'#d8f1ff',w:'#fff',d:'#9fc9e6'},r:["..a..a..","..a..a..",".aaaaaa.","aaaaaaad","awwaaaad","awaaaaad","aaaaaadd",".dddddd."]};
+const SHEET={p:{p:'#f4f0e1',l:'#9a9a9a'},r:[".pppppp.",".pllllp.",".pppppp.",".pllllp.",".pppppp.",".pllllp.",".pppppp.",".pppppp."]};
+const BALL={p:{p:'#f4f0e1',s:'#cfc8b0',l:'#aaa'},r:["..pppp..",".pppppp.","pplpppsp","pppppppp","psppplpp","ppppspps",".pppppp.","..pppp.."]};
+const CAN={p:{m:'#b8c2cc',r:'#e0463a',w:'#fff'},r:[".mmmmmm.",".wmmmmm.",".rrrrrr.",".rwrrrr.",".rrrrrr.",".rrrrrr.",".mmmmmm.","..mmmm.."]};
+const TIN={p:{m:'#b8c2cc',t:'#d9a441',w:'#fff'},r:[".mmmmmm.","mmmmmmmm","mttttttm","mtwttttm","mttttttm","mmmmmmmm",".mmmmmm.","........"]};
+LEVELS[0].sp=[BOTTLE,BAG];LEVELS[1].sp=[SHEET,BALL];LEVELS[2].sp=[CAN,TIN];
+/* ---- obstacles ---- */
+const BATEAU={p:{"k": "#333", "w": "#f4f4f4", "c": "#7fd6ff", "r": "#d94a3a"},r:[".........kk.........", "........wwwwww......", "........wcwcww......", "........wwwwww......", "rrrrrrrrrrrrrrrrrrrr", "wwwwwwwwwwwwwwwwwwww", ".rrrrrrrrrrrrrrrrrr.", "..rrrrrrrrrrrrrrrr..", "...kkkkkkkkkkkkkk..."]};
+const PECHEUR={p:{"s": "#d49a62", "t": "#e8c860", "y": "#2f7fd1", "b": "#8a5a2b", "d": "#5a3a1a", "k": "#222"},r:["...tttt.......kk", "..tttttt....kk..", "....ss....kk....", "....ss..kk......", "...yyyykk.......", "...yyyy.........", "...yyyy.........", ".bbbbbbbbbbbbbb.", "..dddddddddddd.."]};
+const NAGEUR={p:{"s": "#f2c08a", "c": "#e0463a", "e": "#222", "u": "#bfeeff", "w": "#fff"},r:["....cccc......", "...cccccc.....", "...ssssss.....", "ss.sesssss.ss.", ".uuuuuuuuuuuu.", "uwuwuwuwuwuwuw"]};
+const TRONC={p:{"b": "#7a4a21", "d": "#5a3418", "l": "#a06a35", "r": "#c9955a", "g": "#3a7d2c"},r:[".bbbgbbbbbbgbbbbb.", "rllbbbbbbbbbbbbbbd", "rllbbdbbbbbbdbbbbd", "rllbbbbbbbbbbbbbbd", ".dddddddddddddddd."]};
+const OBS={tronc:{s:TRONC,v:1,bob:2},nageur:{s:NAGEUR,v:.8,bob:4},pecheur:{s:PECHEUR,v:.9,bob:2},bateau:{s:BATEAU,v:1.25,bob:1}};
+
+
+/* ---- état ---- */
+let state='title',lvl=0,collected=0,lives=LIVES,items=[],timer=1,scroll=0,flash=0,t=0,bannerOk=false,obst=[],obsTimer=3,inv=0;
+const m={x:60,y:150};let sparks=[];
+const waves=[...Array(28)].map(()=>({x:Math.random()*W,y:TOP+6+Math.random()*(BOT-TOP-12),w:8+Math.random()*16,f:.5+Math.random()*.7}));
+const keys={};let pdown=false,ptx=0,pty=0;
+const L=()=>LEVELS[lvl],spd=()=>L().speed*(1+.03*collected);
+
+let ac;function beep(f,d,ty){try{ac=ac||new(window.AudioContext||window.webkitAudioContext)();const o=ac.createOscillator(),v=ac.createGain();o.type=ty||'square';o.frequency.value=f;v.gain.value=.05;o.connect(v);v.connect(ac.destination);o.start();o.stop(ac.currentTime+d)}catch(e){}}
+
+function startLevel(){lives=LIVES;collected=0;items=[];obst=[];obsTimer=3;inv=0;sparks=[];timer=1;m.x=60;m.y=150;state='intro';}
+function advance(){
+  if(state==='title'||state==='intro'){state==='title'?(lvl=0,startLevel()):state='play';beep(660,.1);}
+  else if(state==='over'){lvl=0;bannerOk=false;startLevel();beep(520,.1);}
+  else if(state==='win'){lvl=0;bannerOk=false;startLevel();}
+  pdown=false;
+}
+
+/* ---- entrées ---- */
+addEventListener('keydown',e=>{const k=e.key.toLowerCase();
+  if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k))e.preventDefault();
+  if(k===' '||k==='enter'){if(state!=='play')advance();}
+  keys[k]=true;});
+addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+function pos(e){const r=cv.getBoundingClientRect(),s=Math.min(r.width/W,r.height/H),ox=(r.width-W*s)/2,oy=(r.height-H*s)/2;return[(e.clientX-r.left-ox)/s,(e.clientY-r.top-oy)/s]}
+cv.addEventListener('pointerdown',e=>{if(state!=='play'){advance();return}pdown=true;[ptx,pty]=pos(e);try{cv.setPointerCapture(e.pointerId)}catch(_){}});
+cv.addEventListener('pointermove',e=>{if(pdown)[ptx,pty]=pos(e)});
+addEventListener('pointerup',()=>pdown=false);
+
+/* ---- jeu ---- */
+function update(dt){
+  t+=dt;const base=state==='play'?spd():40;scroll+=base*dt;
+  waves.forEach(w=>{w.x-=base*w.f*dt;if(w.x<-w.w)w.x=W});
+  flash=Math.max(0,flash-dt);
+  sparks=sparks.filter(s=>(s.l-=dt)>0);sparks.forEach(s=>{s.x+=s.vx*dt;s.y+=s.vy*dt});
+  if(state!=='play')return;
+  let dx=0,dy=0;
+  if(keys.arrowleft||keys.a||keys.q)dx--;if(keys.arrowright||keys.d)dx++;
+  if(keys.arrowup||keys.w||keys.z)dy--;if(keys.arrowdown||keys.s)dy++;
+  if(pdown){const vx=ptx-(m.x+24),vy=pty-(m.y+17),d=Math.hypot(vx,vy);if(d>5){dx=vx/d;dy=vy/d}}
+  else if(dx&&dy){dx*=.707;dy*=.707}
+  m.x+=dx*SWIM*dt-base*CURRENT*dt;m.y+=dy*SWIM*dt;
+  m.x=Math.max(4,Math.min(W-52,m.x));m.y=Math.max(TOP,Math.min(BOT-34,m.y));
+  timer-=dt;
+  if(timer<=0){timer=Math.max(1.2,2.2-.05*collected);
+    items.push({x:W+2,y:TOP+6+Math.random()*(BOT-TOP-40),s:L().sp[Math.random()*2|0],ph:Math.random()*6});}
+  inv=Math.max(0,inv-dt);obsTimer-=dt;
+  if(obsTimer<=0){obsTimer=L().every*(.8+Math.random()*.5);
+    const ty=L().obs[Math.random()*L().obs.length|0],h=OBS[ty].s.r.length*3;
+    obst.push({x:W+2,y:TOP+4+Math.random()*(BOT-TOP-h-8),ty,ph:Math.random()*6});}
+  for(let i=obst.length-1;i>=0;i--){const o=obst[i],d=OBS[o.ty];o.x-=spd()*d.v*dt;
+    const w=d.s.r[0].length*3,h=d.s.r.length*3,oy=o.y+Math.sin(t*2+o.ph)*d.bob;
+    if(o.x<-w-4){obst.splice(i,1);continue}
+    if(inv<=0&&m.x+8<o.x+w-4&&m.x+42>o.x+4&&m.y+6<oy+h-3&&m.y+28>oy+3){
+      lives--;inv=1.6;flash=.4;beep(150,.3,'sawtooth');
+      if(lives<=0){state='over';return}}
+  }
+  for(let i=items.length-1;i>=0;i--){const it=items[i];it.x-=spd()*dt;
+    const cx=it.x+12,cy=it.y+12+Math.sin(t*3+it.ph)*3;
+    if(Math.hypot(cx-(m.x+24),cy-(m.y+17))<30){
+      items.splice(i,1);collected++;beep(880,.08);setTimeout(()=>beep(1175,.1),70);
+      for(let k=0;k<8;k++)sparks.push({x:cx,y:cy,vx:(Math.random()-.5)*120,vy:(Math.random()-.5)*120,l:.5});
+      if(collected>=L().goal){items=[];obst=[];if(lvl>=LEVELS.length-1){state='win';beep(1320,.3)}else{lvl++;bannerOk=true;startLevel();beep(1320,.3)}return;}
+    }else if(it.x<-28){items.splice(i,1);lives--;flash=.4;beep(180,.25,'sawtooth');
+      if(lives<=0){state='over';return}}
+  }
+}
+
+/* ---- dessin ---- */
+function txt(s,x,y,sz,c,al){g.font='bold '+sz+'px "Courier New",monospace';g.textAlign=al||'center';g.fillStyle='#0b1d33';g.fillText(s,x+1,y+1);g.fillStyle=c||'#fff';g.fillText(s,x,y)}
+function draw(){
+  g.fillStyle='#2f9e9a';g.fillRect(0,0,W,H);
+  g.fillStyle='#3db3ac';for(let y=TOP;y<BOT;y+=24)g.fillRect(0,y,W,12);
+  g.fillStyle='#8fe3da';waves.forEach(w=>g.fillRect(Math.round(w.x),Math.round(w.y),w.w,2));
+  // berges
+  g.fillStyle='#1b5e34';g.fillRect(0,0,W,TOP-4);g.fillRect(0,BOT+4,W,H-BOT);
+  const o=scroll%20,q=Math.floor(scroll/20);
+  for(let i=-1;i<26;i++){const h=4+(((i+q)%5+5)%5)*2;
+    g.fillStyle='#1b5e34';g.fillRect(i*20-o,TOP-4,20,h);g.fillRect(i*20-o,BOT+4-h,20,h);
+    g.fillStyle='#2a8a4a';g.fillRect(i*20-o+4,TOP-4+h-2,8,2);}
+  const po=scroll%100;
+  for(let i=-1;i<6;i++){const x=i*100-po;g.fillStyle='#7a4a21';g.fillRect(x+10,BOT-14,6,24);
+    g.fillStyle='#37b24d';g.fillRect(x-2,BOT-22,30,8);g.fillRect(x+4,BOT-28,18,6);g.fillStyle='#2a8a4a';g.fillRect(x-2,BOT-16,30,2);}
+  // obstacles
+  obst.forEach(o=>{const d=OBS[o.ty];spr(d.s,o.x,o.y+Math.sin(t*2+o.ph)*d.bob,3)});
+  // déchets
+  items.forEach(it=>spr(it.s,it.x,it.y+Math.sin(t*3+it.ph)*3,3));
+  // sirène
+  if((state==='play'||state==='intro'||state==='over')&&!(inv>0&&Math.floor(t*12)%2))spr(MERMAID,m.x,m.y+Math.sin(t*5)*2,3);
+  sparks.forEach(s=>{g.fillStyle='#fff7a8';g.fillRect(s.x|0,s.y|0,4,4)});
+  if(flash>0){g.fillStyle='rgba(255,60,60,'+flash*1.2+')';g.fillRect(0,0,W,H)}
+  // HUD
+  if(state==='play'){
+    for(let i=0;i<LIVES;i++)spr(i<lives?HEART:HEART0,8+i*26,8,3);
+    txt('Niveau '+(lvl+1)+' · '+L().name,W/2,24,14);
+    txt(collected+' / '+L().goal,W-10,24,16,'#ffe66d','right');
+  }
+  // écrans
+  if(state!=='play'){
+    g.fillStyle='rgba(5,20,40,.8)';g.fillRect(0,0,W,H);
+    if(state==='title'){
+      txt('IARA',W/2,76,44,'#7be8a8');txt("la sirène de l'Amazone",W/2,104,16,'#cfe');
+      spr(MERMAID,W/2-24,122,3);
+      txt('Aide Iara à nettoyer la rivière !',W/2,190,14);
+      txt('Évite bateaux, pêcheurs et nageurs !',W/2,212,13,'#cfe');
+      txt('Flèches / ZQSD ou glisse ton doigt',W/2,232,13,'#cfe');
+      if(t%1<.7)txt('▶ Clique ou appuie sur Espace',W/2,284,15,'#ffe66d');
+    }else if(state==='intro'){
+      if(bannerOk)txt('BRAVO ! Niveau réussi 🎉',W/2,60,18,'#7be8a8');
+      txt('NIVEAU '+(lvl+1),W/2,100,34,'#ffe66d');
+      txt(L().name,W/2,138,24);
+      L().sp.forEach((s,i)=>spr(s,W/2-52+i*52,156,5));
+      txt('Ramasse '+L().goal+' déchets',W/2,228,15,'#cfe');
+      txt('Attention aux obstacles !',W/2,252,13,'#ffb3b3');
+      if(t%1<.7)txt('▶ Clique pour jouer',W/2,278,15,'#ffe66d');
+    }else if(state==='over'){
+      txt('OH NON !',W/2,100,36,'#ff6b6b');txt('Plus de vies...',W/2,138,18);
+      txt('Courage, la rivière a besoin de toi !',W/2,170,13,'#cfe');
+      if(t%1<.7)txt('▶ Recommencer',W/2,240,18,'#ffe66d');
+    }else if(state==='win'){
+      txt('BRAVO !',W/2,90,40,'#ffe66d');txt('La rivière est propre !',W/2,130,20,'#7be8a8');
+      txt('Merci petite sirène 💙',W/2,164,15);
+      if(t%1<.7)txt('▶ Rejouer',W/2,240,18,'#ffe66d');
+    }
+  }
+}
+let last=performance.now();
+(function loop(n){const dt=Math.min(.05,(n-last)/1000);last=n;update(dt);draw();requestAnimationFrame(loop)})(last);
+</script></body></html>
